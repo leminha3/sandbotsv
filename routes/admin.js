@@ -1,158 +1,167 @@
-// Admin-only routes
+// routes/admin.js — Supabase version
 const router = require('express').Router();
 const { getDB } = require('../db/database');
 const { adminAuth } = require('../middleware/auth');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
-const crypto = require('crypto');
+const { randomUUID } = require('crypto');
 
 const SECRET = process.env.JWT_SECRET || 'sandbot-jwt-secret-change-me';
 
-// ── Auth ───────────────────────────────────────────────────────────────────
-router.post('/login', (req, res) => {
+// ── Login ──────────────────────────────────────────────────────────────────
+router.post('/login', async (req, res) => {
   const db = getDB();
   const { username, password } = req.body;
-  const admin = db.prepare('SELECT * FROM admins WHERE username=?').get(username);
-  if(!admin || !bcrypt.compareSync(password, admin.password_hash))
-    return res.status(401).json({error:'Sai username hoặc password'});
+  const { data: admins } = await db.from('admins').select('*').eq('username', username).limit(1);
+  const admin = admins?.[0];
+  if (!admin || !bcrypt.compareSync(password, admin.password_hash))
+    return res.status(401).json({ error: 'Sai username hoặc password' });
   const token = jwt.sign({ id: admin.id, username }, SECRET, { expiresIn: '24h' });
   res.json({ token, username });
 });
 
-// All routes below require admin auth
 router.use(adminAuth);
 
-// ── Dashboard stats ────────────────────────────────────────────────────────
-router.get('/stats', (req, res) => {
+// ── Stats ──────────────────────────────────────────────────────────────────
+router.get('/stats', async (req, res) => {
   const db = getDB();
-  const totalDevices = db.prepare('SELECT COUNT(*) as c FROM devices').get().c;
-  const activeToday = db.prepare("SELECT COUNT(*) as c FROM devices WHERE last_seen>?").get(Date.now()-86400000).c;
-  const blocked = db.prepare('SELECT COUNT(*) as c FROM devices WHERE is_blocked=1').get().c;
-  const totalMsgs = db.prepare('SELECT SUM(total_messages) as s FROM devices').get().s || 0;
-  const recentErrors = db.prepare('SELECT COUNT(*) as c FROM errors WHERE ts>?').get(Date.now()-86400000).c;
-  const totalNotifs = db.prepare('SELECT COUNT(*) as c FROM notifications').get().c;
+  const [
+    { count: totalDevices },
+    { count: activeToday },
+    { count: blocked },
+    { data: msgData },
+    { count: recentErrors },
+    { count: totalNotifs }
+  ] = await Promise.all([
+    db.from('devices').select('*', { count: 'exact', head: true }),
+    db.from('devices').select('*', { count: 'exact', head: true }).gt('last_seen', Date.now() - 86400000),
+    db.from('devices').select('*', { count: 'exact', head: true }).eq('is_blocked', 1),
+    db.from('devices').select('total_messages'),
+    db.from('errors').select('*', { count: 'exact', head: true }).gt('ts', Date.now() - 86400000),
+    db.from('notifications').select('*', { count: 'exact', head: true })
+  ]);
+  const totalMsgs = (msgData || []).reduce((s, d) => s + (d.total_messages || 0), 0);
   res.json({ totalDevices, activeToday, blocked, totalMsgs, recentErrors, totalNotifs });
 });
 
 // ── Devices ────────────────────────────────────────────────────────────────
-router.get('/devices', (req, res) => {
+router.get('/devices', async (req, res) => {
   const db = getDB();
-  const { search, blocked, page=1, limit=50 } = req.query;
-  let sql = 'SELECT * FROM devices WHERE 1=1';
-  const params = [];
-  if(search){ sql+=' AND id LIKE ?'; params.push('%'+search+'%'); }
-  if(blocked!==undefined){ sql+=' AND is_blocked=?'; params.push(blocked==='true'?1:0); }
-  sql += ' ORDER BY last_seen DESC LIMIT ? OFFSET ?';
-  params.push(parseInt(limit), (parseInt(page)-1)*parseInt(limit));
-  const devices = db.prepare(sql).all(...params);
-  const total = db.prepare('SELECT COUNT(*) as c FROM devices').get().c;
-  res.json({ devices, total, page: parseInt(page) });
+  const { search, blocked, page = 1, limit = 100 } = req.query;
+  const from = (parseInt(page) - 1) * parseInt(limit);
+  const to = from + parseInt(limit) - 1;
+
+  let query = db.from('devices').select('*', { count: 'exact' }).order('last_seen', { ascending: false }).range(from, to);
+  if (search) query = query.ilike('id', `%${search}%`);
+  if (blocked !== undefined) query = query.eq('is_blocked', blocked === 'true' ? 1 : 0);
+
+  const { data: devices, count } = await query;
+  res.json({ devices: devices || [], total: count || 0, page: parseInt(page) });
 });
 
-router.get('/devices/:id', (req, res) => {
+router.get('/devices/:id', async (req, res) => {
   const db = getDB();
-  const device = db.prepare('SELECT * FROM devices WHERE id=?').get(req.params.id);
-  if(!device) return res.status(404).json({error:'Not found'});
-  const errors = db.prepare('SELECT * FROM errors WHERE device_id=? ORDER BY ts DESC LIMIT 20').all(req.params.id);
-  res.json({ device, errors });
+  const { data: devArr } = await db.from('devices').select('*').eq('id', req.params.id).limit(1);
+  if (!devArr?.length) return res.status(404).json({ error: 'Not found' });
+  const { data: errors } = await db.from('errors').select('*').eq('device_id', req.params.id).order('ts', { ascending: false }).limit(20);
+  res.json({ device: devArr[0], errors: errors || [] });
 });
 
-// Block / unblock device
-router.post('/devices/:id/block', (req, res) => {
+router.post('/devices/:id/block', async (req, res) => {
   const db = getDB();
   const { reason } = req.body;
-  db.prepare('UPDATE devices SET is_blocked=1,blocked_reason=? WHERE id=?').run(reason||'Blocked by admin', req.params.id);
+  await db.from('devices').update({ is_blocked: 1, blocked_reason: reason || 'Blocked by admin' }).eq('id', req.params.id);
   res.json({ ok: true });
 });
 
-router.post('/devices/:id/unblock', (req, res) => {
+router.post('/devices/:id/unblock', async (req, res) => {
   const db = getDB();
-  db.prepare('UPDATE devices SET is_blocked=0,blocked_reason="" WHERE id=?').run(req.params.id);
+  await db.from('devices').update({ is_blocked: 0, blocked_reason: '' }).eq('id', req.params.id);
   res.json({ ok: true });
 });
 
-// Update msg limit for device
-router.post('/devices/:id/limit', (req, res) => {
+router.post('/devices/:id/limit', async (req, res) => {
   const db = getDB();
   const { limit } = req.body;
-  if(!limit || isNaN(limit)) return res.status(400).json({error:'Invalid limit'});
-  db.prepare('UPDATE devices SET msg_limit=? WHERE id=?').run(parseInt(limit), req.params.id);
+  if (!limit || isNaN(limit)) return res.status(400).json({ error: 'Invalid limit' });
+  await db.from('devices').update({ msg_limit: parseInt(limit) }).eq('id', req.params.id);
   res.json({ ok: true });
 });
 
-// Update notes
-router.post('/devices/:id/notes', (req, res) => {
+router.post('/devices/:id/notes', async (req, res) => {
   const db = getDB();
-  db.prepare('UPDATE devices SET notes=? WHERE id=?').run(req.body.notes||'', req.params.id);
+  await db.from('devices').update({ notes: req.body.notes || '' }).eq('id', req.params.id);
   res.json({ ok: true });
 });
 
 // ── Notifications ──────────────────────────────────────────────────────────
-router.get('/notifications', (req, res) => {
+router.get('/notifications', async (req, res) => {
   const db = getDB();
-  const notifs = db.prepare('SELECT * FROM notifications ORDER BY created_at DESC LIMIT 100').all();
-  res.json({ notifications: notifs });
+  const { data } = await db.from('notifications').select('*').order('created_at', { ascending: false }).limit(100);
+  res.json({ notifications: data || [] });
 });
 
-router.post('/notifications', (req, res) => {
+router.post('/notifications', async (req, res) => {
   const db = getDB();
   const { type, title, body, version, updateUrl, sizeMB, target, expiresInHours } = req.body;
-  if(!type||!title) return res.status(400).json({error:'type and title required'});
-  const id = crypto.randomUUID();
+  if (!type || !title) return res.status(400).json({ error: 'type and title required' });
   const now = Date.now();
-  const expiresAt = expiresInHours ? now + expiresInHours*3600000 : 0;
-  db.prepare(`INSERT INTO notifications (id,type,title,body,version,update_url,size_mb,target,created_at,expires_at) VALUES (?,?,?,?,?,?,?,?,?,?)`)
-    .run(id, type, title, body||'', version||'', updateUrl||'', sizeMB||0, target||'all', now, expiresAt);
-  res.json({ ok: true, id });
+  await db.from('notifications').insert({
+    id: randomUUID(), type, title,
+    body: body || '', version: version || '',
+    update_url: updateUrl || '', size_mb: sizeMB || 0,
+    target: target || 'all', created_at: now,
+    expires_at: expiresInHours ? now + expiresInHours * 3600000 : 0
+  });
+  res.json({ ok: true });
 });
 
-router.delete('/notifications/:id', (req, res) => {
+router.delete('/notifications/:id', async (req, res) => {
   const db = getDB();
-  db.prepare('DELETE FROM notifications WHERE id=?').run(req.params.id);
+  await db.from('notifications').delete().eq('id', req.params.id);
   res.json({ ok: true });
 });
 
 // ── Errors ─────────────────────────────────────────────────────────────────
-router.get('/errors', (req, res) => {
+router.get('/errors', async (req, res) => {
   const db = getDB();
-  const errors = db.prepare('SELECT * FROM errors ORDER BY ts DESC LIMIT 200').all();
-  res.json({ errors });
+  const { data } = await db.from('errors').select('*').order('ts', { ascending: false }).limit(200);
+  res.json({ errors: data || [] });
 });
 
-router.delete('/errors', (req, res) => {
+router.delete('/errors', async (req, res) => {
   const db = getDB();
-  db.prepare('DELETE FROM errors').run();
+  await db.from('errors').delete().neq('id', 0);
   res.json({ ok: true });
 });
 
-// ── Global settings ────────────────────────────────────────────────────────
-router.post('/global/msg-limit', (req, res) => {
+// ── Global ─────────────────────────────────────────────────────────────────
+router.post('/global/msg-limit', async (req, res) => {
   const db = getDB();
   const { limit } = req.body;
-  if(!limit||isNaN(limit)) return res.status(400).json({error:'Invalid limit'});
-  db.prepare('UPDATE devices SET msg_limit=?').run(parseInt(limit));
-  res.json({ ok: true, updated: db.prepare('SELECT changes() as c').get().c });
-});
-
-router.post('/global/block-all', (req, res) => {
-  const db = getDB();
-  db.prepare("UPDATE devices SET is_blocked=1,blocked_reason='Maintenance'").run();
+  if (!limit || isNaN(limit)) return res.status(400).json({ error: 'Invalid limit' });
+  await db.from('devices').update({ msg_limit: parseInt(limit) }).neq('id', '');
   res.json({ ok: true });
 });
 
-router.post('/global/unblock-all', (req, res) => {
+router.post('/global/block-all', async (req, res) => {
   const db = getDB();
-  db.prepare("UPDATE devices SET is_blocked=0,blocked_reason=''").run();
+  await db.from('devices').update({ is_blocked: 1, blocked_reason: 'Maintenance' }).neq('id', '');
   res.json({ ok: true });
 });
 
-// Change admin password
-router.post('/change-password', (req, res) => {
+router.post('/global/unblock-all', async (req, res) => {
+  const db = getDB();
+  await db.from('devices').update({ is_blocked: 0, blocked_reason: '' }).neq('id', '');
+  res.json({ ok: true });
+});
+
+router.post('/change-password', async (req, res) => {
   const db = getDB();
   const { newPassword } = req.body;
-  if(!newPassword||newPassword.length<8) return res.status(400).json({error:'Password too short'});
+  if (!newPassword || newPassword.length < 8) return res.status(400).json({ error: 'Password too short' });
   const hash = bcrypt.hashSync(newPassword, 10);
-  db.prepare('UPDATE admins SET password_hash=? WHERE id=?').run(hash, req.admin.id);
+  await db.from('admins').update({ password_hash: hash }).eq('id', req.admin.id);
   res.json({ ok: true });
 });
 
