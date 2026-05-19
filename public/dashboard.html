@@ -1,0 +1,446 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sandbot Dashboard</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f4f4f2;
+      --panel: #ffffff;
+      --panel-2: #eeeeeb;
+      --text: #151515;
+      --muted: #6d6d67;
+      --line: #d8d8d2;
+      --accent: #242424;
+      --danger: #7a1f1f;
+      --ok: #1f5f3d;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 14px;
+    }
+    button, input, select, textarea {
+      font: inherit;
+      border-radius: 6px;
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--text);
+    }
+    button {
+      min-height: 36px;
+      padding: 0 12px;
+      border-color: var(--accent);
+      background: var(--accent);
+      color: #fff;
+      cursor: pointer;
+    }
+    button.secondary {
+      background: var(--panel);
+      color: var(--text);
+      border-color: var(--line);
+    }
+    button.danger {
+      background: var(--danger);
+      border-color: var(--danger);
+    }
+    input, select, textarea {
+      width: 100%;
+      min-height: 36px;
+      padding: 8px 10px;
+    }
+    textarea { min-height: 86px; resize: vertical; }
+    label {
+      display: grid;
+      gap: 6px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0;
+    }
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 18px 24px;
+      border-bottom: 1px solid var(--line);
+      background: var(--panel);
+    }
+    h1, h2 {
+      margin: 0;
+      letter-spacing: 0;
+    }
+    h1 { font-size: 20px; }
+    h2 { font-size: 16px; }
+    main {
+      display: grid;
+      gap: 16px;
+      padding: 18px;
+      max-width: 1320px;
+      margin: 0 auto;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .two {
+      display: grid;
+      grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr);
+      gap: 16px;
+      align-items: start;
+    }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px;
+    }
+    .stat {
+      min-height: 84px;
+      display: grid;
+      align-content: center;
+      gap: 6px;
+    }
+    .stat span {
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+      font-weight: 700;
+    }
+    .stat strong { font-size: 28px; }
+    .toolbar, .actions {
+      display: flex;
+      gap: 8px;
+      align-items: end;
+      flex-wrap: wrap;
+    }
+    .toolbar > * { max-width: 220px; }
+    .section-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      table-layout: fixed;
+    }
+    th, td {
+      padding: 10px 8px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: middle;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    th {
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+      background: var(--panel-2);
+    }
+    .id-col { width: 26%; }
+    .status {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      padding: 0 8px;
+      border-radius: 999px;
+      background: var(--panel-2);
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .status.ok { color: var(--ok); }
+    .status.bad { color: var(--danger); }
+    .stack {
+      display: grid;
+      gap: 10px;
+    }
+    .notice {
+      min-height: 22px;
+      color: var(--muted);
+    }
+    .login {
+      max-width: 420px;
+      margin: 12vh auto 0;
+    }
+    .hidden { display: none; }
+
+    @media (max-width: 900px) {
+      header { align-items: flex-start; flex-direction: column; }
+      .grid, .two { grid-template-columns: 1fr; }
+      .toolbar > * { max-width: none; width: 100%; }
+      .actions button { flex: 1 1 120px; }
+      table { min-width: 760px; }
+      .table-wrap { overflow-x: auto; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Sandbot Dashboard</h1>
+      <div id="sessionText" class="notice">Chua dang nhap</div>
+    </div>
+    <div class="actions">
+      <button class="secondary" id="refreshBtn">Refresh</button>
+      <button class="secondary" id="logoutBtn">Logout</button>
+    </div>
+  </header>
+
+  <main>
+    <section id="loginPanel" class="panel login">
+      <div class="stack">
+        <h2>Dang nhap</h2>
+        <label>Username <input id="username" autocomplete="username"></label>
+        <label>Password <input id="password" type="password" autocomplete="current-password"></label>
+        <button id="loginBtn">Login</button>
+        <div id="loginMsg" class="notice"></div>
+      </div>
+    </section>
+
+    <section id="appPanel" class="hidden stack">
+      <div class="grid">
+        <div class="panel stat"><span>Thiet bi</span><strong id="totalDevices">0</strong></div>
+        <div class="panel stat"><span>Online 24h</span><strong id="activeToday">0</strong></div>
+        <div class="panel stat"><span>Bi khoa</span><strong id="blocked">0</strong></div>
+        <div class="panel stat"><span>Tin nhan</span><strong id="totalMsgs">0</strong></div>
+      </div>
+
+      <div class="two">
+        <section class="panel">
+          <div class="section-title">
+            <h2>Thiet bi</h2>
+            <div class="toolbar">
+              <label>Tim ID <input id="search" placeholder="device id"></label>
+              <label>Global limit <input id="globalLimit" type="number" min="0" value="100"></label>
+              <button id="applyGlobalLimit">Ap dung</button>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th class="id-col">ID</th>
+                  <th>Platform</th>
+                  <th>Status</th>
+                  <th>Limit</th>
+                  <th>Today</th>
+                  <th>Total</th>
+                  <th>Control</th>
+                </tr>
+              </thead>
+              <tbody id="deviceRows"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="stack">
+            <h2>Gui thong bao</h2>
+            <label>Loai
+              <select id="notifType">
+                <option value="info">info</option>
+                <option value="warning">warning</option>
+                <option value="update">update</option>
+              </select>
+            </label>
+            <label>Tieu de <input id="notifTitle"></label>
+            <label>Noi dung <textarea id="notifBody"></textarea></label>
+            <label>Target <input id="notifTarget" value="all"></label>
+            <label>Het han sau gio <input id="notifExpires" type="number" min="0" placeholder="0 = khong het han"></label>
+            <button id="sendNotif">Gui thong bao</button>
+            <div id="actionMsg" class="notice"></div>
+          </div>
+        </section>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const state = {
+      token: localStorage.getItem('sandbot_token') || '',
+      username: localStorage.getItem('sandbot_user') || ''
+    };
+
+    const $ = (id) => document.getElementById(id);
+    const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#39;'
+    })[char]);
+
+    function api(path, options = {}) {
+      const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
+      if (state.token) headers.Authorization = `Bearer ${state.token}`;
+      return fetch(path, { ...options, headers }).then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+        return data;
+      });
+    }
+
+    function showApp() {
+      $('loginPanel').classList.toggle('hidden', Boolean(state.token));
+      $('appPanel').classList.toggle('hidden', !state.token);
+      $('sessionText').textContent = state.token ? `Dang nhap: ${state.username || 'admin'}` : 'Chua dang nhap';
+    }
+
+    function setMsg(text) {
+      $('actionMsg').textContent = text;
+    }
+
+    function fmtTime(ts) {
+      if (!ts) return 'never';
+      return new Date(Number(ts)).toLocaleString();
+    }
+
+    async function loadStats() {
+      const stats = await api('/api/admin/stats');
+      $('totalDevices').textContent = stats.totalDevices || 0;
+      $('activeToday').textContent = stats.activeToday || 0;
+      $('blocked').textContent = stats.blocked || 0;
+      $('totalMsgs').textContent = stats.totalMsgs || 0;
+    }
+
+    async function loadDevices() {
+      const query = new URLSearchParams();
+      if ($('search').value.trim()) query.set('search', $('search').value.trim());
+      const data = await api(`/api/admin/devices?${query}`);
+      $('deviceRows').innerHTML = (data.devices || []).map((device) => {
+        const active = Number(device.last_seen || 0) > Date.now() - 86400000;
+        const blocked = Number(device.is_blocked) === 1;
+        const id = esc(device.id);
+        return `
+          <tr>
+            <td title="${id}">${id}</td>
+            <td title="${esc(device.platform || '')}">${esc(device.platform || 'Windows')}</td>
+            <td><span class="status ${blocked ? 'bad' : active ? 'ok' : ''}">${blocked ? 'blocked' : active ? 'online' : 'offline'}</span></td>
+            <td><input data-limit="${id}" type="number" min="0" value="${device.msg_limit ?? 100}" title="Last seen: ${fmtTime(device.last_seen)}"></td>
+            <td>${device.msg_count_today || 0}</td>
+            <td>${device.total_messages || 0}</td>
+            <td class="actions">
+              <button class="secondary" data-save="${id}">Save</button>
+              <button class="${blocked ? 'secondary' : 'danger'}" data-block="${id}" data-blocked="${blocked}">${blocked ? 'Unblock' : 'Block'}</button>
+            </td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    async function refresh() {
+      if (!state.token) return;
+      await Promise.all([loadStats(), loadDevices()]);
+      setMsg('Da cap nhat.');
+    }
+
+    $('loginBtn').addEventListener('click', async () => {
+      try {
+        const username = $('username').value.trim();
+        const password = $('password').value;
+        const data = await api('/api/admin/login', {
+          method: 'POST',
+          body: JSON.stringify({ username, password })
+        });
+        state.token = data.token;
+        state.username = data.username;
+        localStorage.setItem('sandbot_token', state.token);
+        localStorage.setItem('sandbot_user', state.username);
+        $('loginMsg').textContent = '';
+        showApp();
+        refresh();
+      } catch (error) {
+        $('loginMsg').textContent = error.message;
+      }
+    });
+
+    $('logoutBtn').addEventListener('click', () => {
+      state.token = '';
+      state.username = '';
+      localStorage.removeItem('sandbot_token');
+      localStorage.removeItem('sandbot_user');
+      showApp();
+    });
+
+    $('refreshBtn').addEventListener('click', () => refresh().catch((error) => setMsg(error.message)));
+    $('search').addEventListener('input', () => loadDevices().catch((error) => setMsg(error.message)));
+
+    $('deviceRows').addEventListener('click', async (event) => {
+      const saveId = event.target.dataset.save;
+      const blockId = event.target.dataset.block;
+      try {
+        if (saveId) {
+          const input = document.querySelector(`[data-limit="${CSS.escape(saveId)}"]`);
+          await api('/api/admin/control', {
+            method: 'POST',
+            body: JSON.stringify({ deviceId: saveId, action: 'limit', limit: Number(input.value) })
+          });
+          setMsg('Da luu limit.');
+        }
+        if (blockId) {
+          const isBlocked = event.target.dataset.blocked === 'true';
+          await api('/api/admin/control', {
+            method: 'POST',
+            body: JSON.stringify({ deviceId: blockId, action: isBlocked ? 'unblock' : 'block', reason: 'Blocked by admin' })
+          });
+          setMsg(isBlocked ? 'Da mo khoa.' : 'Da khoa.');
+        }
+        await refresh();
+      } catch (error) {
+        setMsg(error.message);
+      }
+    });
+
+    $('applyGlobalLimit').addEventListener('click', async () => {
+      try {
+        const limit = Number($('globalLimit').value);
+        const data = await api('/api/admin/global/msg-limit', {
+          method: 'POST',
+          body: JSON.stringify({ limit })
+        });
+        setMsg(`Da cap nhat ${data.updated || 0} thiet bi.`);
+        await refresh();
+      } catch (error) {
+        setMsg(error.message);
+      }
+    });
+
+    $('sendNotif').addEventListener('click', async () => {
+      try {
+        const payload = {
+          type: $('notifType').value,
+          title: $('notifTitle').value.trim(),
+          body: $('notifBody').value.trim(),
+          target: $('notifTarget').value.trim() || 'all',
+          expiresInHours: Number($('notifExpires').value || 0)
+        };
+        const data = await api('/api/admin/notifications', {
+          method: 'POST',
+          body: JSON.stringify(payload)
+        });
+        setMsg(`Da gui thong bao ${data.id}.`);
+      } catch (error) {
+        setMsg(error.message);
+      }
+    });
+
+    showApp();
+    refresh().catch(() => {});
+  </script>
+</body>
+</html>
